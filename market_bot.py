@@ -13,23 +13,15 @@ from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from apscheduler.schedulers.background import BackgroundScheduler
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
 
 # ============================================================
 # CONFIG
 # ============================================================
-GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY", "")
-SENDER_EMAIL    = os.getenv("SENDER_EMAIL", "srv19246@gmail.com")
-SENDER_PASSWORD = os.getenv("SENDER_PASSWORD", "epsy okyw jyqr ztcs")
-RECIPIENTS      = [
-    os.getenv("RECIPIENT_1", "ranveersingh8823@gmail.com"),
-    os.getenv("RECIPIENT_2", "amitindia0001@yahoo.com"),
-    os.getenv("RECIPIENT_3", "hello@bxgo.ai")
-]
-GNEWS_API_KEY   = os.getenv("GNEWS_API_KEY", "")
+GEMINI_API_KEY  = "AIzaSyDNnGXQedB5JMMEifsuwzT52a39HibF8iY"
+SENDER_EMAIL    = "srv19246@gmail.com"
+SENDER_PASSWORD = "epsy okyw jyqr ztcs"
+RECIPIENTS      = ["ranveersingh8823@gmail.com", "amitindia0001@yahoo.com", "hello@bxgo.ai"]
+GNEWS_API_KEY   = "4d141e6ed9c1c94559d66c74380ba60f"
 
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -79,7 +71,8 @@ def send_email(subject, html):
         msg["From"]    = SENDER_EMAIL
         msg["To"]      = ", ".join(RECIPIENTS)
         msg.attach(MIMEText(html, "html"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.sendmail(SENDER_EMAIL, RECIPIENTS, msg.as_string())
         logger.info(f"✅ Email sent: {subject[:60]}")
@@ -108,110 +101,70 @@ td{{padding:9px 8px;border-bottom:0.5px solid #f0f0f0}}
 </div></body></html>"""
 
 # ============================================================
-# YAHOO FINANCE — FETCH NSE DATA
+# GEMINI — FETCH NSE DATA
 # ============================================================
 def get_nse_active_stocks():
-    """Fetch most active NSE stocks by volume"""
+    """Use Gemini to get most active stocks from NSE"""
     try:
-        # Top NSE stocks by volume
-        stocks_symbols = [
-            ("RELIANCE", "Reliance Industries"),
-            ("TCS", "Tata Consultancy Services"),
-            ("HDFCBANK", "HDFC Bank"),
-            ("INFY", "Infosys"),
-            ("WIPRO", "Wipro"),
-            ("HEROMOTOCORP", "Hero MotoCorp"),
-            ("BAJAJFINSV", "Bajaj Finserv"),
-            ("AXISBANK", "Axis Bank"),
-            ("BHARATIARTL", "Bharati Airtel"),
-            ("SBIN", "State Bank of India"),
+        prompt = """
+        Go to https://www.nseindia.com/market-data/most-active-securities-market-wide
+        and extract the top 10 most active stocks right now.
+        
+        Return ONLY a JSON array like this:
+        [
+          {"rank": 1, "symbol": "RELIANCE", "name": "Reliance Industries", "price": 2850.50, "change": 45.20, "pct": 1.61, "volume": "12.5M"},
+          ...
         ]
         
-        results = []
-        headers = {"User-Agent": "Mozilla/5.0"}
-        
-        for symbol, name in stocks_symbols:
-            try:
-                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.NS?interval=1d&range=1d"
-                res = requests.get(url, headers=headers, timeout=10).json()
-                meta = res["chart"]["result"][0]["meta"]
-                price = meta.get("regularMarketPrice", 0)
-                prev = meta.get("previousClose") or meta.get("chartPreviousClose", price)
-                change = round(price - prev, 2)
-                pct = round((change / prev) * 100, 2) if prev else 0
-                volume = meta.get("regularMarketVolume", 0)
-                
-                # Format volume
-                if volume >= 1000000:
-                    vol_str = f"{volume/1000000:.1f}M"
-                elif volume >= 1000:
-                    vol_str = f"{volume/1000:.1f}K"
-                else:
-                    vol_str = str(volume)
-                
-                results.append({
-                    "rank": len(results) + 1,
-                    "symbol": symbol,
-                    "name": name,
-                    "price": price,
-                    "change": change,
-                    "pct": pct,
-                    "volume": vol_str
-                })
-            except Exception as e:
-                logger.error(f"Stock {symbol} error: {e}")
-                continue
-        
-        logger.info(f"✅ Got {len(results)} NSE stocks")
-        return results
+        Use today's live data. Return only valid JSON, no other text.
+        """
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        # Clean JSON
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0].strip()
+        data = json.loads(text)
+        logger.info(f"✅ Gemini got {len(data)} active stocks")
+        return data
     except Exception as e:
-        logger.error(f"NSE stocks error: {e}")
+        logger.error(f"Gemini NSE error: {e}")
         return []
 
 def get_nse_market_summary():
-    """Fetch Sensex, Nifty, and market summary from Yahoo Finance"""
+    """Use Gemini to get Sensex, Nifty, market summary"""
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
+        prompt = """
+        Get the current live market data from NSE India website (nseindia.com):
+        - Nifty 50 current value and % change
+        - Sensex current value and % change  
+        - Market breadth (advances vs declines)
+        - Top gainer and top loser stock today
         
-        # Fetch Nifty
-        nifty_url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?interval=1d&range=1d"
-        nifty_res = requests.get(nifty_url, headers=headers, timeout=10).json()
-        nifty_meta = nifty_res["chart"]["result"][0]["meta"]
-        nifty_value = nifty_meta.get("regularMarketPrice", 0)
-        nifty_prev = nifty_meta.get("previousClose") or nifty_meta.get("chartPreviousClose", nifty_value)
-        nifty_change = round(nifty_value - nifty_prev, 2)
-        nifty_pct = round((nifty_change / nifty_prev) * 100, 2) if nifty_prev else 0
-        
-        # Fetch Sensex
-        sensex_url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EBSESN?interval=1d&range=1d"
-        sensex_res = requests.get(sensex_url, headers=headers, timeout=10).json()
-        sensex_meta = sensex_res["chart"]["result"][0]["meta"]
-        sensex_value = sensex_meta.get("regularMarketPrice", 0)
-        sensex_prev = sensex_meta.get("previousClose") or sensex_meta.get("chartPreviousClose", sensex_value)
-        sensex_change = round(sensex_value - sensex_prev, 2)
-        sensex_pct = round((sensex_change / sensex_prev) * 100, 2) if sensex_prev else 0
-        
-        summary = {
-            "nifty": {
-                "value": nifty_value,
-                "change": nifty_change,
-                "pct": nifty_pct
-            },
-            "sensex": {
-                "value": sensex_value,
-                "change": sensex_change,
-                "pct": sensex_pct
-            },
-            "advances": 1200,  # Placeholder (Yahoo Finance doesn't provide market breadth)
-            "declines": 800,   # Placeholder
-            "top_gainer": {"symbol": "N/A", "pct": 0},
-            "top_loser": {"symbol": "N/A", "pct": 0}
+        Return ONLY JSON like:
+        {
+          "nifty": {"value": 22500.50, "change": 120.30, "pct": 0.54},
+          "sensex": {"value": 74200.00, "change": 350.50, "pct": 0.47},
+          "advances": 1200,
+          "declines": 800,
+          "top_gainer": {"symbol": "TATAMOTORS", "pct": 3.2},
+          "top_loser": {"symbol": "WIPRO", "pct": -2.1}
         }
         
-        logger.info("✅ Got market summary from Yahoo Finance")
-        return summary
+        Return only valid JSON, no other text.
+        """
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0].strip()
+        data = json.loads(text)
+        logger.info("✅ Gemini got market summary")
+        return data
     except Exception as e:
-        logger.error(f"Market summary error: {e}")
+        logger.error(f"Gemini market summary error: {e}")
         return {}
 
 # ============================================================
@@ -260,17 +213,20 @@ def build_active_stocks_html(stocks):
     if not stocks:
         return "<p style='color:#888;padding:10px'>Data unavailable right now</p>"
     rows = ""
-    for s in stocks[:10]:
-        chg   = s.get('change', 0) or 0
-        pct   = s.get('pct', 0) or 0
+    for i, s in enumerate(stocks[:10]):
+        if not s or not isinstance(s, dict):
+            continue
+        chg   = float(s.get('change') or 0)
+        pct   = float(s.get('pct') or 0)
+        price = float(s.get('price') or 0)
         color = "#27ae60" if chg >= 0 else "#e74c3c"
         arrow = "▲" if chg >= 0 else "▼"
-        bg    = "#f9f9f9" if stocks.index(s) % 2 == 0 else "#ffffff"
+        bg    = "#f9f9f9" if i % 2 == 0 else "#ffffff"
         rows += f"""<tr style="background:{bg}">
             <td style="padding:8px;color:#666">{s.get('rank','')}</td>
             <td style="padding:8px"><b>{s.get('symbol','')}</b><br>
             <span style="font-size:11px;color:#888">{s.get('name','')}</span></td>
-            <td style="padding:8px;font-weight:600">₹{s.get('price',0):,.2f}</td>
+            <td style="padding:8px;font-weight:600">₹{price:,.2f}</td>
             <td style="padding:8px;color:{color};font-weight:700">{arrow} {abs(pct)}%</td>
             <td style="padding:8px;color:#888;font-size:12px">{s.get('volume','')}</td>
         </tr>"""
@@ -330,30 +286,36 @@ def send_market_open_email():
 
     # Fetch all data
     stocks        = get_nse_active_stocks()
+    summary       = get_nse_market_summary()
     indian_etfs   = fetch_etf_data(INDIAN_ETFS)
     intl_etfs     = fetch_etf_data(INTL_ETFS)
+    gold, silver  = get_gold_silver()
 
     body = f"""
     <div class="s">
-        <div class="st" style="background:#e8f4fd;color:#1a5276">🔥 MOST ACTIVE STOCKS — NSE</div>
+        <div class="st" style="background:#e8f8f0;color:#1e8449">💹 MARKET SUMMARY — OPEN</div>
+        {build_market_summary_html(summary, gold, silver)}
+    </div>
+    <div class="s" style="padding-top:0">
+        <div class="st" style="background:#e8f4fd;color:#1a5276">🔥 TOP 10 MOST ACTIVE STOCKS — NSE</div>
         {build_active_stocks_html(stocks)}
     </div>
     <div class="s" style="padding-top:0">
-        <div class="st" style="background:#fff0f0;color:#c0392b">📉 MOST DOWN INDIAN ETFs</div>
+        <div class="st" style="background:#fff0f0;color:#c0392b">📉 TOP 5 MOST DOWN INDIAN ETFs</div>
         {build_etf_html(indian_etfs, "🇮🇳")}
     </div>
     <div class="s" style="padding-top:0">
-        <div class="st" style="background:#f0f4ff;color:#2c3e8c">🌍 MOST DOWN GLOBAL ETFs</div>
+        <div class="st" style="background:#f0f4ff;color:#2c3e8c">🌍 TOP 5 MOST DOWN GLOBAL ETFs</div>
         {build_etf_html(intl_etfs, "🌍")}
     </div>"""
 
     html = email_wrap(
         "📈 Market Open — 9:30 AM",
-        f"📅 {datetime.now().strftime('%d %b %Y')} · NSE Market Data",
+        f"📅 {datetime.now().strftime('%d %b %Y')} · NSE Live Data · Most Active & Most Down",
         "#1e8449",
         body
     )
-    send_email(f"📈 Market Open — {datetime.now().strftime('%d %b %Y')}", html)
+    send_email(f"📈 Market Open Report — {datetime.now().strftime('%d %b %Y')}", html)
 
 # ============================================================
 # EMAIL 2 — 3:00 PM MARKET CLOSE
@@ -362,20 +324,26 @@ def send_market_close_email():
     logger.info("📧 Sending 3:00 PM market close email...")
 
     stocks       = get_nse_active_stocks()
+    summary      = get_nse_market_summary()
     indian_etfs  = fetch_etf_data(INDIAN_ETFS)
     intl_etfs    = fetch_etf_data(INTL_ETFS)
+    gold, silver = get_gold_silver()
 
     body = f"""
     <div class="s">
-        <div class="st" style="background:#e8f4fd;color:#1a5276">🔥 MOST ACTIVE STOCKS — NSE</div>
+        <div class="st" style="background:#fff0f0;color:#c0392b">📊 MARKET SUMMARY — CLOSE</div>
+        {build_market_summary_html(summary, gold, silver)}
+    </div>
+    <div class="s" style="padding-top:0">
+        <div class="st" style="background:#e8f4fd;color:#1a5276">🔥 TOP 10 MOST ACTIVE STOCKS — NSE</div>
         {build_active_stocks_html(stocks)}
     </div>
     <div class="s" style="padding-top:0">
-        <div class="st" style="background:#fff0f0;color:#c0392b">📉 MOST DOWN INDIAN ETFs</div>
+        <div class="st" style="background:#fff0f0;color:#c0392b">📉 TOP 5 MOST DOWN INDIAN ETFs TODAY</div>
         {build_etf_html(indian_etfs, "🇮🇳")}
     </div>
     <div class="s" style="padding-top:0">
-        <div class="st" style="background:#f0f4ff;color:#2c3e8c">🌍 MOST DOWN GLOBAL ETFs</div>
+        <div class="st" style="background:#f0f4ff;color:#2c3e8c">🌍 TOP 5 MOST DOWN GLOBAL ETFs TODAY</div>
         {build_etf_html(intl_etfs, "🌍")}
     </div>"""
 
@@ -385,90 +353,56 @@ def send_market_close_email():
         "#c0392b",
         body
     )
-    send_email(f"🔔 Market Close — {datetime.now().strftime('%d %b %Y')}", html)
+    send_email(f"🔔 Market Close Report — {datetime.now().strftime('%d %b %Y')}", html)
 
 # ============================================================
-# EMAIL 3 — INSTANT ALERTS (ETF 2%+ & STOCKS 5%+)
+# EMAIL 3 — INSTANT ALERTS
 # ============================================================
 def check_instant_alerts():
     global ALERTED_TODAY
     today_key = datetime.now().strftime("%Y-%m-%d")
-    etf_alerts = []
-    stock_alerts = []
-    headers = {"User-Agent": "Mozilla/5.0"}
+    alerts    = []
+    headers   = {"User-Agent": "Mozilla/5.0"}
 
-    # Check ETF drops (2%+)
     all_etfs = {**INDIAN_ETFS, **INTL_ETFS}
     for name, symbol in all_etfs.items():
         try:
             url  = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=1d"
             res  = requests.get(url, headers=headers, timeout=10).json()
-            meta = res["chart"]["result"][0]["meta"]
-            price    = meta.get("regularMarketPrice", 0)
-            prev     = meta.get("previousClose") or meta.get("chartPreviousClose", price)
+            result = res.get("chart", {}).get("result")
+            if not result:
+                continue
+            meta = result[0].get("meta", {})
+            price    = float(meta.get("regularMarketPrice") or 0)
+            prev     = float(meta.get("previousClose") or meta.get("chartPreviousClose") or price)
             pct      = round(((price - prev) / prev) * 100, 2) if prev else 0
             currency = "₹" if ".NS" in symbol else "$"
             flag     = "🇮🇳" if ".NS" in symbol else "🌍"
-            key      = f"etf_{symbol}_{today_key}"
+            key      = f"{symbol}_{today_key}"
 
             # Alert if drops 2%+ (not alerted today)
             if pct <= -2.0 and not ALERTED_TODAY.get(key):
-                etf_alerts.append({
+                alerts.append({
                     "name": name, "symbol": symbol,
                     "price": price, "pct": pct,
                     "change": round(price - prev, 2),
                     "currency": currency, "flag": flag
                 })
                 ALERTED_TODAY[key] = True
+
         except Exception as e:
-            logger.error(f"ETF alert check error {name}: {e}")
+            logger.error(f"Alert check error {name}: {e}")
 
-    # Check Stock drops (5%+)
-    stocks_symbols = [
-        ("RELIANCE", "Reliance Industries"),
-        ("TCS", "Tata Consultancy Services"),
-        ("HDFCBANK", "HDFC Bank"),
-        ("INFY", "Infosys"),
-        ("WIPRO", "Wipro"),
-        ("HEROMOTOCORP", "Hero MotoCorp"),
-        ("BAJAJFINSV", "Bajaj Finserv"),
-        ("AXISBANK", "Axis Bank"),
-        ("BHARATIARTL", "Bharati Airtel"),
-        ("SBIN", "State Bank of India"),
-    ]
-    
-    for symbol, name in stocks_symbols:
-        try:
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.NS?interval=1d&range=1d"
-            res = requests.get(url, headers=headers, timeout=10).json()
-            meta = res["chart"]["result"][0]["meta"]
-            price = meta.get("regularMarketPrice", 0)
-            prev = meta.get("previousClose") or meta.get("chartPreviousClose", price)
-            pct = round(((price - prev) / prev) * 100, 2) if prev else 0
-            key = f"stock_{symbol}_{today_key}"
+    if alerts:
+        send_instant_alert_email(alerts)
 
-            # Alert if drops 5%+ (not alerted today)
-            if pct <= -5.0 and not ALERTED_TODAY.get(key):
-                stock_alerts.append({
-                    "symbol": symbol, "name": name,
-                    "price": price, "pct": pct,
-                    "change": round(price - prev, 2)
-                })
-                ALERTED_TODAY[key] = True
-        except Exception as e:
-            logger.error(f"Stock alert check error {symbol}: {e}")
-
-    if etf_alerts or stock_alerts:
-        send_instant_alert_email(etf_alerts, stock_alerts)
-
-def send_instant_alert_email(etf_alerts, stock_alerts):
+def send_instant_alert_email(alerts):
     date = datetime.now().strftime("%d %b %Y %I:%M %p")
 
-    # ETF Alert Rows
-    etf_rows = ""
-    for i, e in enumerate(etf_alerts, 1):
+    rows = ""
+    for i, e in enumerate(alerts, 1):
         bg = "#fff5f5" if i % 2 == 0 else "#ffffff"
-        etf_rows += f"""<tr style="background:{bg}">
+        rows += f"""<tr style="background:{bg}">
             <td style="padding:10px;font-size:16px">{e['flag']}</td>
             <td style="padding:10px"><b>{e['name']}</b><br>
             <span style="font-size:11px;color:#888">{e['symbol']}</span></td>
@@ -477,53 +411,21 @@ def send_instant_alert_email(etf_alerts, stock_alerts):
             <td style="padding:10px;color:#e74c3c">{e['currency']}{abs(e['change']):,.2f}</td>
         </tr>"""
 
-    # Stock Alert Rows
-    stock_rows = ""
-    for i, s in enumerate(stock_alerts, 1):
-        bg = "#fff5f5" if i % 2 == 0 else "#ffffff"
-        stock_rows += f"""<tr style="background:{bg}">
-            <td style="padding:10px">🇮🇳</td>
-            <td style="padding:10px"><b>{s['name']}</b><br>
-            <span style="font-size:11px;color:#888">{s['symbol']}</span></td>
-            <td style="padding:10px;font-weight:600">₹{s['price']:,.2f}</td>
-            <td style="padding:10px;color:#e74c3c;font-weight:700;font-size:15px">▼ {abs(s['pct'])}%</td>
-            <td style="padding:10px;color:#e74c3c">₹{abs(s['change']):,.2f}</td>
-        </tr>"""
-
-    body = ""
-    if etf_alerts:
-        body += f"""
-        <div class="s">
-            <p style="color:#c0392b;font-weight:600;background:#fff5f5;padding:12px;border-radius:8px;margin-bottom:14px">
-            🚨 ETFs dropped 2% or more</p>
-            <table><thead><tr>
-                <th></th><th>ETF Name</th><th>Price</th><th>Drop %</th><th>Drop Amount</th>
-            </tr></thead><tbody>{etf_rows}</tbody></table>
-        </div>"""
-
-    if stock_alerts:
-        body += f"""
-        <div class="s">
-            <p style="color:#c0392b;font-weight:600;background:#fff5f5;padding:12px;border-radius:8px;margin-bottom:14px">
-            🚨 Stocks dropped 5% or more</p>
-            <table><thead><tr>
-                <th></th><th>Stock Name</th><th>Price</th><th>Drop %</th><th>Drop Amount</th>
-            </tr></thead><tbody>{stock_rows}</tbody></table>
-        </div>"""
+    body = f"""
+    <div class="s">
+        <p style="color:#c0392b;font-weight:600;background:#fff5f5;padding:12px;border-radius:8px;margin-bottom:14px">
+        ⚠️ The following ETFs have dropped 2% or more — immediate attention required</p>
+        <table><thead><tr>
+            <th></th><th>ETF Name</th><th>Price</th><th>Drop %</th><th>Drop Amount</th>
+        </tr></thead><tbody>{rows}</tbody></table>
+    </div>"""
 
     html = email_wrap(
-        "🚨 ALERT — ETF/Stock Drop",
-        f"⏰ {date} IST · Real-time monitoring",
+        "🚨 ETF Drop Alert — 2% or More!",
+        f"⏰ {date} IST · Real-time alert",
         "#c0392b", body
     )
-    
-    subject = "🚨 ALERT"
-    if etf_alerts:
-        subject += f" — ETF Down 2%+ ({len(etf_alerts)})"
-    if stock_alerts:
-        subject += f" — Stock Down 5%+ ({len(stock_alerts)})"
-    
-    send_email(subject, html)
+    send_email(f"🚨 ETF Drop Alert (-2%+) — {date}", html)
 
 # ============================================================
 # MAIN
