@@ -177,9 +177,16 @@ def fetch_etf_data(symbols_dict):
         try:
             url  = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=1d"
             res  = requests.get(url, headers=headers, timeout=10).json()
-            meta = res["chart"]["result"][0]["meta"]
+            chart_result = res.get("chart", {}).get("result")
+            if not chart_result or not isinstance(chart_result, list) or len(chart_result) == 0:
+                continue
+            meta = chart_result[0].get("meta")
+            if not meta:
+                continue
             price    = meta.get("regularMarketPrice", 0)
             prev     = meta.get("previousClose") or meta.get("chartPreviousClose", price)
+            if not price or not prev:
+                continue
             change   = round(price - prev, 2)
             pct      = round((change / prev) * 100, 2) if prev else 0
             currency = "₹" if ".NS" in symbol else "$"
@@ -219,16 +226,24 @@ def build_active_stocks_html(stocks):
         chg   = float(s.get('change') or 0)
         pct   = float(s.get('pct') or 0)
         price = float(s.get('price') or 0)
+        rank  = s.get('rank', '')
+        symbol = s.get('symbol', '')
+        name = s.get('name', '')
+        volume = s.get('volume', '')
+        
+        if not symbol:
+            continue
+            
         color = "#27ae60" if chg >= 0 else "#e74c3c"
         arrow = "▲" if chg >= 0 else "▼"
         bg    = "#f9f9f9" if i % 2 == 0 else "#ffffff"
         rows += f"""<tr style="background:{bg}">
-            <td style="padding:8px;color:#666">{s.get('rank','')}</td>
-            <td style="padding:8px"><b>{s.get('symbol','')}</b><br>
-            <span style="font-size:11px;color:#888">{s.get('name','')}</span></td>
+            <td style="padding:8px;color:#666">{rank}</td>
+            <td style="padding:8px"><b>{symbol}</b><br>
+            <span style="font-size:11px;color:#888">{name}</span></td>
             <td style="padding:8px;font-weight:600">₹{price:,.2f}</td>
             <td style="padding:8px;color:{color};font-weight:700">{arrow} {abs(pct)}%</td>
-            <td style="padding:8px;color:#888;font-size:12px">{s.get('volume','')}</td>
+            <td style="padding:8px;color:#888;font-size:12px">{volume}</td>
         </tr>"""
     return f"""<table><thead><tr>
         <th>#</th><th>Stock</th><th>Price</th><th>Change</th><th>Volume</th>
@@ -370,12 +385,14 @@ def check_instant_alerts():
             url  = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=1d"
             res  = requests.get(url, headers=headers, timeout=10).json()
             result = res.get("chart", {}).get("result")
-            if not result:
+            if not result or not isinstance(result, list) or len(result) == 0:
                 continue
             meta = result[0].get("meta", {})
+            if not meta:
+                continue
             price    = float(meta.get("regularMarketPrice") or 0)
             prev     = float(meta.get("previousClose") or meta.get("chartPreviousClose") or price)
-            pct      = round(((price - prev) / prev) * 100, 2) if prev else 0
+            pct      = round(((price - prev) / prev) * 100, 2) if prev and price else 0
             currency = "₹" if ".NS" in symbol else "$"
             flag     = "🇮🇳" if ".NS" in symbol else "🌍"
             key      = f"{symbol}_{today_key}"
